@@ -5,6 +5,8 @@ import faiss
 import numpy as np
 import os
 from dotenv import load_dotenv
+import torch
+from accelerate import Accelerator
 import newspaper
 from newspaper import Article
 
@@ -13,6 +15,9 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Initialize Accelerator
+accelerator = Accelerator()
 
 # Load sentiment analysis model
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
@@ -37,9 +42,11 @@ def create_faiss_index(documents):
 # Sentiment analysis function with star ratings
 def analyze_sentiment_with_stars(text):
     try:
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        device = accelerator.device
+        model.to(device)
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(device)
         outputs = model(**inputs)
-        scores = outputs[0][0].detach().numpy()
+        scores = outputs[0][0].detach().cpu().numpy()
         probabilities = (np.exp(scores) / np.sum(np.exp(scores))).tolist()  # Softmax
 
         # Map to star ratings (1 to 5)

@@ -267,7 +267,8 @@ if st.button("Start Scraping"):
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
             time.sleep(10)  # Wait for scraping to complete (adjust as needed)
-            st.info(f"Scraping done. Storing results in {os.path.join('JSON-output', f'{query.replace(' ', '_')}.json')}")
+            safe_query = "".join([c if c.isalnum() else "_" for c in query])
+            st.info(f"Scraping done. Storing results in {os.path.join('JSON-output', f'{safe_query}.json')}")
         else:
             st.error("Failed to start scraping. Please try again.")
 

@@ -182,6 +182,9 @@ def scrape_and_analyze(query, num_pages=1):
         with open(output_file, "w", encoding="utf-8") as file:
             json.dump(results, file, ensure_ascii=False, indent=4)
         print(f"Results saved to {output_file}")
+        # Update Streamlit status
+        st.session_state.scraping_done = True
+        st.session_state.output_file = output_file
     except Exception as e:
         print(f"Error saving results to file: {e}")
 
@@ -263,41 +266,47 @@ if st.button("Start Scraping"):
         st.error("Please enter a search query.")
     else:
         st.info("Scraping data in progress...")
+        st.session_state.scraping_done = False
+        st.session_state.scraping_started = True
         response = requests.post("http://localhost:8503/start_scraping", json={"query": query, "num_pages": num_pages})
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
-            time.sleep(10)  # Wait for scraping to complete (adjust as needed)
-            safe_query = "".join([c if c.isalnum() else "_" for c in query])
-            st.info(f"Scraping done. Storing results in {os.path.join('/mount/src/sentiment-streamlit/JSON-output', f'{safe_query}.json')}")
+            st.info("Scraping is still in progress...")  # Show the message once
+            while not st.session_state.scraping_done:
+                time.sleep(5)  # Check every 5 seconds
+            st.info(f"Scraping done. Storing results in {st.session_state.output_file}")
         else:
             st.error("Failed to start scraping. Please try again.")
 
 # Dropdown to view or download the result
-if st.button("View/Download Results"):
-    if not query:
-        st.error("Please enter a search query.")
-    else:
-        safe_query = "".join([c if c.isalnum() else "_" for c in query])
-        output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
-        
-        # Fetch the results
-        response = requests.get(f"http://localhost:8503/stream_results?query={query}")
-        if response.status_code == 200:
-            try:
-                results = response.json()
-                # Convert results to a DataFrame for better display
-                df = pd.DataFrame(results)
-                st.dataframe(df)
-                
-                # Download link for the JSON file
-                st.download_button(
-                    label="Download Results as JSON",
-                    data=json.dumps(results, indent=4),
-                    file_name=f"{safe_query}.json",
-                    mime="application/json"
-                )
-            except json.JSONDecodeError:
-                st.error("Failed to decode JSON response. Please try again.")
+if st.session_state.get("scraping_done", False):
+    if st.button("View/Download Results"):
+        if not query:
+            st.error("Please enter a search query.")
         else:
-            st.error("Failed to fetch results. Please try again.")
+            safe_query = "".join([c if c.isalnum() else "_" for c in query])
+            output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
+            
+            # Fetch the results
+            response = requests.get(f"http://localhost:8503/stream_results?query={query}")
+            if response.status_code == 200:
+                try:
+                    results = response.json()
+                    # Convert results to a DataFrame for better display
+                    df = pd.DataFrame(results)
+                    st.dataframe(df)
+                    
+                    # Download link for the JSON file
+                    st.download_button(
+                        label="Download Results as JSON",
+                        data=json.dumps(results, indent=4),
+                        file_name=f"{safe_query}.json",
+                        mime="application/json"
+                    )
+                except json.JSONDecodeError:
+                    st.error("Failed to decode JSON response. Please try again.")
+            else:
+                st.error("Failed to fetch results. Please try again.")
+elif st.session_state.get("scraping_started", False):
+    st.info("Scraping is still in progress. Please wait...")
 

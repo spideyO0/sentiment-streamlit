@@ -29,8 +29,8 @@ accelerator = Accelerator()
 
 # Load sentiment analysis model
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
-tokenizer = AutoTokenizer.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', token=hf_token)
-model = AutoModelForSequenceClassification.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', token=hf_token)
+tokenizer = AutoTokenizer.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', use_auth_token=hf_token)
+model = AutoModelForSequenceClassification.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', use_auth_token=hf_token)
 
 # Load Sentence Transformer model for embeddings
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -225,7 +225,7 @@ def stream_results():
 
 # Function to run the Flask app
 def run_flask():
-    app.run(debug=True, use_reloader=False, port=5000)
+    app.run(debug=True, use_reloader=False, port=5001)  # Use a different port
 
 # Start the Flask server in a separate thread
 threading.Thread(target=run_flask).start()
@@ -261,7 +261,7 @@ if st.button("Start Scraping"):
         st.error("Please enter a search query.")
     else:
         st.info("Scraping data in progress...")
-        response = requests.post("http://localhost:5000/start_scraping", json={"query": query, "num_pages": num_pages})
+        response = requests.post("http://localhost:5001/start_scraping", json={"query": query, "num_pages": num_pages})
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
             time.sleep(10)  # Wait for scraping to complete (adjust as needed)
@@ -278,20 +278,23 @@ if st.button("View/Download Results"):
         output_file = f"{safe_query}.json"
         
         # Fetch the results
-        response = requests.get(f"http://localhost:5000/stream_results?query={query}")
+        response = requests.get(f"http://localhost:5001/stream_results?query={query}")
         if response.status_code == 200:
-            results = response.json()
-            
-            # Convert results to a DataFrame for better display
-            df = pd.DataFrame(results)
-            st.dataframe(df)
-            
-            # Download link for the JSON file
-            st.download_button(
-                label="Download Results as JSON",
-                data=json.dumps(results, indent=4),
-                file_name=output_file,
-                mime="application/json"
-            )
+            try:
+                results = response.json()
+                # Convert results to a DataFrame for better display
+                df = pd.DataFrame(results)
+                st.dataframe(df)
+                
+                # Download link for the JSON file
+                st.download_button(
+                    label="Download Results as JSON",
+                    data=json.dumps(results, indent=4),
+                    file_name=output_file,
+                    mime="application/json"
+                )
+            except json.JSONDecodeError:
+                st.error("Failed to decode JSON response. Please try again.")
         else:
             st.error("Failed to fetch results. Please try again.")
+

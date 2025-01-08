@@ -1,0 +1,45 @@
+# Virtual environment
+venv/
+senti-env/
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# VS Code settings
+.vscode/
+
+# Pytest cache
+.pytest_cache/
+
+# Streamlit cache
+.streamlit/
+
+# Logs
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Compiled files
+*.so
+*.dll
+*.dylib
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Distribution files
+dist/
+build/
+*.egg-info/

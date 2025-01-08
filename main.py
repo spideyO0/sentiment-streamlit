@@ -29,8 +29,8 @@ accelerator = Accelerator()
 
 # Load sentiment analysis model
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
-tokenizer = AutoTokenizer.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', use_auth_token=hf_token)
-model = AutoModelForSequenceClassification.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', use_auth_token=hf_token)
+tokenizer = AutoTokenizer.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', token=hf_token)
+model = AutoModelForSequenceClassification.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', token=hf_token)
 
 # Load Sentence Transformer model for embeddings
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -173,7 +173,7 @@ def scrape_and_analyze(query, num_pages=1):
 
     # Create a safe filename from the query
     safe_query = "".join([c if c.isalnum() else "_" for c in query])
-    output_dir = "JSON-output"
+    output_dir = "/mount/src/sentiment-streamlit/JSON-output"
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{safe_query}.json")
 
@@ -210,7 +210,7 @@ def stream_results():
 
     # Create a safe filename from the query
     safe_query = "".join([c if c.isalnum() else "_" for c in query])
-    output_file = os.path.join("JSON-output", f"{safe_query}.json")
+    output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
 
     try:
         def generate():
@@ -227,7 +227,7 @@ def stream_results():
 
 # Function to run the Flask app
 def run_flask():
-    app.run(debug=True, use_reloader=False, port=8502)  # Use port 8502
+    app.run(debug=True, use_reloader=False, port=8503)  # Use port 8503
 
 # Start the Flask server in a separate thread
 threading.Thread(target=run_flask).start()
@@ -263,12 +263,12 @@ if st.button("Start Scraping"):
         st.error("Please enter a search query.")
     else:
         st.info("Scraping data in progress...")
-        response = requests.post("http://localhost:8502/start_scraping", json={"query": query, "num_pages": num_pages})
+        response = requests.post("http://localhost:8503/start_scraping", json={"query": query, "num_pages": num_pages})
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
             time.sleep(10)  # Wait for scraping to complete (adjust as needed)
             safe_query = "".join([c if c.isalnum() else "_" for c in query])
-            st.info(f"Scraping done. Storing results in {os.path.join('JSON-output', f'{safe_query}.json')}")
+            st.info(f"Scraping done. Storing results in {os.path.join('/mount/src/sentiment-streamlit/JSON-output', f'{safe_query}.json')}")
         else:
             st.error("Failed to start scraping. Please try again.")
 
@@ -278,10 +278,10 @@ if st.button("View/Download Results"):
         st.error("Please enter a search query.")
     else:
         safe_query = "".join([c if c.isalnum() else "_" for c in query])
-        output_file = os.path.join("JSON-output", f"{safe_query}.json")
+        output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
         
         # Fetch the results
-        response = requests.get(f"http://localhost:8502/stream_results?query={query}")
+        response = requests.get(f"http://localhost:8503/stream_results?query={query}")
         if response.status_code == 200:
             try:
                 results = response.json()

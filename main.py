@@ -33,33 +33,20 @@ accelerator = Accelerator()
 
 # Load sentiment analysis model
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
-tokenizer = AutoTokenizer.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', token=hf_token)
-model = AutoModelForSequenceClassification.from_pretrained('nlptown/bert-base-multilingual-uncased-sentiment', token=hf_token)
+API_URL = "https://api-inference.huggingface.co/models/nlptown/bert-base-multilingual-uncased-sentiment"
+headers = {"Authorization": f"Bearer {hf_token}"}
 
-# Load Sentence Transformer model for embeddings
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+# Function to query the Hugging Face Inference API
+def query_huggingface_api(payload):
+    response = requests.post(API_URL, headers=headers, json=payload)
+    return response.json()
 
-# Create FAISS index
-def create_faiss_index(documents):
-    try:
-        embeddings = embedding_model.encode(documents, convert_to_tensor=True)
-        embeddings = embeddings.cpu().numpy()  # Convert to numpy array
-        index = faiss.IndexFlatL2(embeddings.shape[1])
-        faiss.normalize_L2(embeddings)
-        index.add(embeddings)
-        return index, embeddings
-    except Exception as e:
-        logging.error(f"Error creating FAISS index: {e}")
-        return None, None
-
-# Sentiment analysis function with star ratings
+# Sentiment analysis function with star ratings using Hugging Face Inference API
 def analyze_sentiment_with_stars(text):
     try:
-        device = accelerator.device
-        model.to(device)
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(device)
-        outputs = model(**inputs)
-        scores = outputs[0][0].detach().cpu().numpy()
+        payload = {"inputs": text}
+        response = query_huggingface_api(payload)
+        scores = response[0]['scores']
         probabilities = (np.exp(scores) / np.sum(np.exp(scores))).tolist()  # Softmax
 
         # Map to star ratings (1 to 5)
@@ -77,6 +64,22 @@ def analyze_sentiment_with_stars(text):
     except Exception as e:
         logging.error(f"Error analyzing sentiment: {e}")
         return None, None, []
+
+# Load Sentence Transformer model for embeddings
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Create FAISS index
+def create_faiss_index(documents):
+    try:
+        embeddings = embedding_model.encode(documents, convert_to_tensor=True)
+        embeddings = embeddings.cpu().numpy()  # Convert to numpy array
+        index = faiss.IndexFlatL2(embeddings.shape[1])
+        faiss.normalize_L2(embeddings)
+        index.add(embeddings)
+        return index, embeddings
+    except Exception as e:
+        logging.error(f"Error creating FAISS index: {e}")
+        return None, None
 
 # Function to extract text from a URL
 def extract_text_from_url(url):
@@ -233,12 +236,19 @@ def stream_results():
         logging.error(f"Error streaming results: {e}")
         return jsonify({"error": "Failed to stream results"}), 500
 
+# Flag to indicate if the Flask server is running
+flask_server_running = False
+
 # Function to run the Flask app
 def run_flask():
-    app.run(debug=True, use_reloader=False, port=8503)  # Use port 8503
+    global flask_server_running
+    if not flask_server_running:
+        flask_server_running = True
+        app.run(debug=True, use_reloader=False, port=8503)  # Use port 8503
 
-# Start the Flask server in a separate thread
-threading.Thread(target=run_flask).start()
+# Start the Flask server in a separate thread if not already running
+if not flask_server_running:
+    threading.Thread(target=run_flask).start()
 
 # Streamlit app title
 st.title("Web Results Sentiment Analysis")
@@ -276,7 +286,7 @@ if st.button("Start Scraping"):
         response = requests.post("http://localhost:8503/start_scraping", json={"query": query, "num_pages": num_pages})
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
-            st.experimental_set_query_params(rerun=True)  # Trigger a rerun
+            st.query_params(rerun=True)  # Trigger a rerun
         else:
             st.error("Failed to start scraping. Please try again.")
 
@@ -313,5 +323,5 @@ if st.button("View/Download Results"):
 if st.session_state.get("scraping_started", False) and not st.session_state.get("scraping_done", False):
     st.info("Scraping is still in progress. Please wait...")
     time.sleep(5)
-    st.experimental_set_query_params(rerun=True)  # Trigger a rerun
+    st.query_params(rerun=True)  # Trigger a rerun
 

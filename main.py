@@ -274,6 +274,8 @@ if st.button("Start Scraping"):
             st.info("Scraping is still in progress...")  # Show the message once
             while not st.session_state.scraping_done:
                 time.sleep(5)  # Check every 5 seconds
+                if st.session_state.scraping_done:
+                    break
             st.info(f"Scraping done. Storing results in {st.session_state.output_file}")
         else:
             st.error("Failed to start scraping. Please try again.")

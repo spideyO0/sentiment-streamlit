@@ -276,7 +276,7 @@ if st.button("Start Scraping"):
         response = requests.post("http://localhost:8503/start_scraping", json={"query": query, "num_pages": num_pages})
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
-            st.experimental_rerun()  # Rerun the app to update the UI
+            st.experimental_set_query_params(rerun=True)  # Trigger a rerun
         else:
             st.error("Failed to start scraping. Please try again.")
 
@@ -313,5 +313,5 @@ if st.button("View/Download Results"):
 if st.session_state.get("scraping_started", False) and not st.session_state.get("scraping_done", False):
     st.info("Scraping is still in progress. Please wait...")
     time.sleep(5)
-    st.experimental_rerun()
+    st.experimental_set_query_params(rerun=True)  # Trigger a rerun
 

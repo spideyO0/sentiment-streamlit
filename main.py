@@ -4,7 +4,6 @@ import time
 import json
 import pandas as pd
 from flask import Flask, request, jsonify, Response, stream_with_context
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -335,6 +334,18 @@ if st.button("View All Stored Results"):
             st.dataframe(df)
         else:
             st.info("No results found in the JSON files.")
+    else:
+        st.info("No results found in the /mount/src/sentiment-streamlit/JSON-output folder.")
+
+# Button to clear all stored results
+if st.button("Clear All Stored Results"):
+    output_dir = "/mount/src/sentiment-streamlit/JSON-output"
+    if os.path.exists(output_dir):
+        for filename in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        st.success("All stored results have been cleared.")
     else:
         st.info("No results found in the /mount/src/sentiment-streamlit/JSON-output folder.")
 

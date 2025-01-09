@@ -286,34 +286,31 @@ if st.button("Start Scraping"):
             st.error("Failed to start scraping. Please try again.")
 
 # Dropdown to view or download the result
-if st.session_state.get("scraping_done", False):
-    if st.button("View/Download Results"):
-        if not query:
-            st.error("Please enter a search query.")
+if st.button("View/Download Results"):
+    if not query:
+        st.error("Please enter a search query.")
+    else:
+        safe_query = "".join([c if c.isalnum() else "_" for c in query])
+        output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
+        
+        # Fetch the results
+        response = requests.get(f"http://localhost:8503/stream_results?query={query}")
+        if response.status_code == 200:
+            try:
+                results = response.json()
+                # Convert results to a DataFrame for better display
+                df = pd.DataFrame(results)
+                st.dataframe(df)
+                
+                # Download link for the JSON file
+                st.download_button(
+                    label="Download Results as JSON",
+                    data=json.dumps(results, indent=4),
+                    file_name=f"{safe_query}.json",
+                    mime="application/json"
+                )
+            except json.JSONDecodeError:
+                st.error("Failed to decode JSON response. Please try again.")
         else:
-            safe_query = "".join([c if c.isalnum() else "_" for c in query])
-            output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
-            
-            # Fetch the results
-            response = requests.get(f"http://localhost:8503/stream_results?query={query}")
-            if response.status_code == 200:
-                try:
-                    results = response.json()
-                    # Convert results to a DataFrame for better display
-                    df = pd.DataFrame(results)
-                    st.dataframe(df)
-                    
-                    # Download link for the JSON file
-                    st.download_button(
-                        label="Download Results as JSON",
-                        data=json.dumps(results, indent=4),
-                        file_name=f"{safe_query}.json",
-                        mime="application/json"
-                    )
-                except json.JSONDecodeError:
-                    st.error("Failed to decode JSON response. Please try again.")
-            else:
-                st.error("Failed to fetch results. Please try again.")
-elif st.session_state.get("scraping_started", False):
-    st.info("Scraping is still in progress. Please wait...")
+            st.error("Failed to fetch results. Please try again.")
 

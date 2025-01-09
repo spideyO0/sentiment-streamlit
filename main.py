@@ -17,6 +17,10 @@ import urllib.parse
 import random
 from readability.readability import Document
 import httpx
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 # Load environment variables
 load_dotenv()
@@ -45,7 +49,7 @@ def create_faiss_index(documents):
         index.add(embeddings)
         return index, embeddings
     except Exception as e:
-        print(f"Error creating FAISS index: {e}")
+        logging.error(f"Error creating FAISS index: {e}")
         return None, None
 
 # Sentiment analysis function with star ratings
@@ -71,7 +75,7 @@ def analyze_sentiment_with_stars(text):
 
         return star_rating, sentiment_label, probabilities
     except Exception as e:
-        print(f"Error analyzing sentiment: {e}")
+        logging.error(f"Error analyzing sentiment: {e}")
         return None, None, []
 
 # Function to extract text from a URL
@@ -87,7 +91,7 @@ def extract_text_from_url(url):
         text = ' '.join([para.get_text() for para in paragraphs])
         return text
     except Exception as e:
-        print(f"Error extracting text from URL {url}: {e}")
+        logging.error(f"Error extracting text from URL {url}: {e}")
         return None
 
 # API route to analyze sentiment of text from search query
@@ -127,7 +131,7 @@ def scrape_and_analyze(query, num_pages=1):
             # Build the URL
             params = {"q": query, "start": page * 10, "hl": "en"}
             url = f"https://www.google.com/search?{urllib.parse.urlencode(params)}"
-            print(f"Fetching: {url}")
+            logging.info(f"Fetching: {url}")
 
             # Rotate user agent
             headers = {"User-Agent": random.choice(user_agents)}
@@ -138,7 +142,7 @@ def scrape_and_analyze(query, num_pages=1):
             html = response.text
 
             if response.status_code == 429:
-                print("Received 429 Too Many Requests. Sleeping for a while...")
+                logging.warning("Received 429 Too Many Requests. Sleeping for a while...")
                 time.sleep(60)  # Sleep for 60 seconds before retrying
                 response = httpx.get(url, headers=headers)
                 response.raise_for_status()
@@ -151,15 +155,15 @@ def scrape_and_analyze(query, num_pages=1):
             for result in soup.select("div.yuRUbf a"):
                 link = result.get('href')
                 if link:
-                    print(f"Found link: {link}")
+                    logging.info(f"Found link: {link}")
                     # Extract text from the URL
                     text = extract_text_from_url(link)
                     if text:
-                        print(f"Extracted text from {link}")
+                        logging.info(f"Extracted text from {link}")
                         # Perform sentiment analysis
                         star_rating, sentiment_label, _ = analyze_sentiment_with_stars(text)
                         if star_rating:
-                            print(f"Analyzed sentiment for {link}: {star_rating} stars, {sentiment_label}")
+                            logging.info(f"Analyzed sentiment for {link}: {star_rating} stars, {sentiment_label}")
                             results.append({
                                 "search_result": text,
                                 "sentiment": f"{star_rating} ({sentiment_label})",
@@ -169,7 +173,7 @@ def scrape_and_analyze(query, num_pages=1):
             # Add delay between page requests
             time.sleep(random.randint(5, 10))
         except Exception as e:
-            print(f"Error scraping page {page}: {e}")
+            logging.error(f"Error scraping page {page}: {e}")
 
     # Create a safe filename from the query
     safe_query = "".join([c if c.isalnum() else "_" for c in query])
@@ -181,12 +185,13 @@ def scrape_and_analyze(query, num_pages=1):
     try:
         with open(output_file, "w", encoding="utf-8") as file:
             json.dump(results, file, ensure_ascii=False, indent=4)
-        print(f"Results saved to {output_file}")
+        logging.info(f"Results saved to {output_file}")
         # Update Streamlit status
         st.session_state.scraping_done = True
         st.session_state.output_file = output_file
     except Exception as e:
-        print(f"Error saving results to file: {e}")
+        logging.error(f"Error saving results to file: {e}")
+        st.session_state.scraping_done = False  # Ensure scraping_done is set to False on error
 
     return results
 
@@ -225,7 +230,7 @@ def stream_results():
     except FileNotFoundError:
         return jsonify({"error": "Results file not found"}), 404
     except Exception as e:
-        print(f"Error streaming results: {e}")
+        logging.error(f"Error streaming results: {e}")
         return jsonify({"error": "Failed to stream results"}), 500
 
 # Function to run the Flask app

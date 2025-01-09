@@ -318,6 +318,26 @@ if st.button("View/Download Results"):
         else:
             st.error("Failed to fetch results. Please try again.")
 
+# Button to view all stored results
+if st.button("View All Stored Results"):
+    output_dir = "/mount/src/sentiment-streamlit/JSON-output"
+    if os.path.exists(output_dir) and os.listdir(output_dir):
+        all_results = []
+        for filename in os.listdir(output_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(output_dir, filename)
+                with open(file_path, "r", encoding="utf-8") as file:
+                    results = json.load(file)
+                    all_results.extend(results)
+        
+        if all_results:
+            df = pd.DataFrame(all_results)
+            st.dataframe(df)
+        else:
+            st.info("No results found in the JSON files.")
+    else:
+        st.info("No results found in the /mount/src/sentiment-streamlit/JSON-output folder.")
+
 # Periodically check the scraping status and update the UI
 if st.session_state.get("scraping_started", False) and not st.session_state.get("scraping_done", False):
     st.info("Scraping is still in progress. Please wait...")

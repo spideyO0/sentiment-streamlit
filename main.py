@@ -30,22 +30,36 @@ app = Flask(__name__)
 # Initialize Accelerator
 accelerator = Accelerator()
 
-# Load sentiment analysis model
+# Hugging Face Inference API details
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
 API_URL = "https://api-inference.huggingface.co/models/nlptown/bert-base-multilingual-uncased-sentiment"
 headers = {"Authorization": f"Bearer {hf_token}"}
 
 # Function to query the Hugging Face Inference API
 def query_huggingface_api(payload):
+    logging.info("Querying Hugging Face Inference API...")
     response = requests.post(API_URL, headers=headers, json=payload)
+    logging.info(f"API response status code: {response.status_code}")
+    if response.status_code != 200:
+        logging.error(f"Error querying Hugging Face Inference API: {response.text}")
+        return None
     return response.json()
 
 # Sentiment analysis function with star ratings using Hugging Face Inference API
 def analyze_sentiment_with_stars(text):
     try:
-        payload = {"inputs": text}
+        # Truncate the text to fit within the model's maximum input length
+        max_length = 512
+        truncated_text = text[:max_length]
+        
+        payload = {"inputs": truncated_text}
         response = query_huggingface_api(payload)
-        scores = response[0]['scores']
+        if response is None:
+            return None, None, []
+        logging.info(f"API response: {response}")
+        
+        # Extract scores from the response
+        scores = [item['score'] for item in response[0]]
         probabilities = (np.exp(scores) / np.sum(np.exp(scores))).tolist()  # Softmax
 
         # Map to star ratings (1 to 5)
@@ -179,12 +193,14 @@ def scrape_and_analyze(query, num_pages=1):
 
     # Create a safe filename from the query
     safe_query = "".join([c if c.isalnum() else "_" for c in query])
-    output_dir = "/mount/src/sentiment-streamlit/JSON-output"
+    # output_dir = r"D:\Python-Projects\sentiment-app\JSON-output"
+    output_dir = r"/mount/src/sentiment-streamlit/JSON-output"
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{safe_query}.json")
 
     # Save results to JSON file
     try:
+        logging.info(f"Saving results to {output_file}...")
         with open(output_file, "w", encoding="utf-8") as file:
             json.dump(results, file, ensure_ascii=False, indent=4)
         logging.info(f"Results saved to {output_file}")
@@ -220,6 +236,7 @@ def stream_results():
 
     # Create a safe filename from the query
     safe_query = "".join([c if c.isalnum() else "_" for c in query])
+    # output_file = os.path.join("D:/Python-Projects/sentiment-app/JSON-output", f"{safe_query}.json")
     output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
 
     try:
@@ -243,10 +260,15 @@ def run_flask():
     global flask_server_running
     if not flask_server_running:
         flask_server_running = True
+        logging.info("Starting Flask server...")
         app.run(debug=True, use_reloader=False, port=8503)  # Use port 8503
 
 # Start the Flask server in a separate thread if not already running
-if not flask_server_running:
+if 'flask_server_running' not in st.session_state:
+    st.session_state.flask_server_running = False
+
+if not st.session_state.flask_server_running:
+    st.session_state.flask_server_running = True
     threading.Thread(target=run_flask).start()
 
 # Streamlit app title
@@ -279,9 +301,10 @@ if st.button("Start Scraping"):
     if not query:
         st.error("Please enter a search query.")
     else:
-        st.info("Scraping data in progress...")
+        # st.info("Scraping data in progress...")
         st.session_state.scraping_done = False
         st.session_state.scraping_started = True
+        logging.info("Sending request to start scraping...")
         response = requests.post("http://localhost:8503/start_scraping", json={"query": query, "num_pages": num_pages})
         if response.status_code == 200:
             st.success("Scraping started. Please wait for the process to complete.")
@@ -294,7 +317,8 @@ if st.button("View/Download Results"):
         st.error("Please enter a search query.")
     else:
         safe_query = "".join([c if c.isalnum() else "_" for c in query])
-        output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
+        # output_file = os.path.join(r"D:\Python-Projects\sentiment-app\JSON-output", f"{safe_query}.json")
+        output_file = os.path.join(r"/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
         
         # Fetch the results
         response = requests.get(f"http://localhost:8503/stream_results?query={query}")
@@ -319,7 +343,8 @@ if st.button("View/Download Results"):
 
 # Button to view all stored results
 if st.button("View All Stored Results"):
-    output_dir = "/mount/src/sentiment-streamlit/JSON-output"
+    # output_dir = r"D:\Python-Projects\sentiment-app\JSON-output"
+    output_dir = r"/mount/src/sentiment-streamlit/JSON-output"
     if os.path.exists(output_dir) and os.listdir(output_dir):
         all_results = []
         for filename in os.listdir(output_dir):
@@ -339,7 +364,8 @@ if st.button("View All Stored Results"):
 
 # Button to clear all stored results
 if st.button("Clear All Stored Results"):
-    output_dir = "/mount/src/sentiment-streamlit/JSON-output"
+    # output_dir = r"D:\Python-Projects\sentiment-app\JSON-output"
+    output_dir = r"/mount/src/sentiment-streamlit/JSON-output"
     if os.path.exists(output_dir):
         for filename in os.listdir(output_dir):
             file_path = os.path.join(output_dir, filename)

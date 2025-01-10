@@ -377,6 +377,6 @@ if st.button("Clear All Stored Results"):
 
 # Periodically check the scraping status and update the UI
 if st.session_state.get("scraping_started", False) and not st.session_state.get("scraping_done", False):
-    st.info("Scraping is still in progress. Please wait...")
+    # st.info("Scraping is still in progress. Please wait...")
     time.sleep(5)
 

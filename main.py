@@ -31,6 +31,7 @@ accelerator = Accelerator()
 
 # Hugging Face Inference API details
 hf_token = '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'
+# hf_token = os.getenv('HUGGINGFACE_TOKEN')
 API_URL = "https://api-inference.huggingface.co/models/nlptown/bert-base-multilingual-uncased-sentiment"
 headers = {"Authorization": f"Bearer {hf_token}"}
 

@@ -278,7 +278,7 @@ sample_queries = [
 ]
 
 # Dropdown for sample search queries
-query = st.selectbox("Select a sample search query or enter your own:", [""] + sample_queries)
+query = st.selectbox("Select a sample search query:", [""] + sample_queries)
 
 # Input box for user input search query
 user_query = st.text_input("Or enter your own search query:")

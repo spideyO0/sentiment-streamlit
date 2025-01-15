@@ -20,6 +20,7 @@ colorama==0.4.6
 cssselect==1.2.0
 datasets==3.2.0
 dill==0.3.8
+duckduckgo_search==7.2.1
 faiss-cpu==1.9.0.post1
 fake-useragent==2.0.3
 feedfinder2==0.0.4
@@ -68,6 +69,7 @@ packaging==24.2
 pandas==2.2.3
 parse==1.20.2
 pillow==11.1.0
+primp==0.10.0
 propcache==0.2.1
 protobuf==5.29.2
 psutil==6.1.1

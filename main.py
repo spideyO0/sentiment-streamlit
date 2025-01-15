@@ -16,6 +16,7 @@ from readability.readability import Document
 import httpx
 import logging
 from duckduckgo_search import DDGS
+from googlesearch import search as google_search  # Import Google search
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +32,6 @@ accelerator = Accelerator()
 
 # Hugging Face Inference API details
 hf_token = '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'
-# hf_token = os.getenv('HUGGINGFACE_TOKEN')
 API_URL = "https://api-inference.huggingface.co/models/nlptown/bert-base-multilingual-uncased-sentiment"
 headers = {"Authorization": f"Bearer {hf_token}"}
 
@@ -111,40 +111,70 @@ def extract_text_from_url(url):
         logging.error(f"Error extracting text from URL {url}: {e}")
         return None
 
-# API route to analyze sentiment of text from search query
-@app.route('/analyze_sentiment', methods=['GET'])
-def analyze_sentiment():
-    query = request.args.get('query')
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
+# Function to perform Google search
+def google_search_results(query, num_results):
+    results = []
+    try:
+        google_results = google_search(query, num_results=num_results, safe='off', sleep_interval=5, advanced=True, region="in", lang="en")
+        for result in google_results:
+            results.append({
+                "title": result.title if hasattr(result, 'title') else "No Title",
+                "url": result.url if hasattr(result, 'url') else result,
+                "description": result.description if hasattr(result, 'description') else "No Description"
+            })
+    except Exception as e:
+        logging.error(f"Google search error: {e}")
+    return results
 
-    # Scrape DuckDuckGo search results and analyze sentiment
-    results = list(scrape_and_analyze(query, num_pages=1))
-    if results:
-        return jsonify(results)
-    else:
-        return jsonify({"error": "Failed to analyze sentiment"}), 500
+# Function to perform DuckDuckGo search
+def duckduckgo_search_results(query, num_results):
+    results = []
+    ddg = DDGS()
+    ddg_results = ddg.text(keywords=query, max_results=num_results)
+    for result in ddg_results:
+        results.append({
+            "title": result.get('title', "No Title"),
+            "url": result.get('href', "No URL"),
+            "description": result.get('body', "No Description")
+        })
+    return results
 
-# Function to scrape DuckDuckGo search results using DDGS and analyze sentiment
+# Function to scrape DuckDuckGo and Google search results and analyze sentiment
 def scrape_and_analyze(query, num_pages=1):
     """
-    Scrape DuckDuckGo search results using DDGS, analyze sentiment, and yield results.
+    Scrape DuckDuckGo and Google search results, analyze sentiment, and yield results.
     
     Args:
         query (str): The search query.
         num_pages (int): Number of pages to scrape.
     """
-    ddgs = DDGS()
-    results = ddgs.text(query, region='in-en', max_results=num_pages * 10)
+    results = []
+
+    # Google Search
+    google_results = google_search_results(query, num_pages * 10)
+    results.extend(google_results)
+
+    # Print Google results
+    logging.info("Google Results:")
+    for result in google_results:
+        logging.info(result)
+
+    # DuckDuckGo Search
+    ddg_results = duckduckgo_search_results(query, num_pages * 10)
+    results.extend(ddg_results)
+
+    # Print DuckDuckGo results
+    logging.info("DuckDuckGo Results:")
+    for result in ddg_results:
+        logging.info(result)
 
     for result in results:
         title = result.get("title", "No Title")
-        link = result.get("href")
-        source = result.get("source", "Unknown Source")
-        snippet = result.get("body", "No Snippet")
+        link = result.get("url")
+        snippet = result.get("description", "No Snippet")
 
         if link:
-            logging.info(f"Found news article: {title} from {source}")
+            logging.info(f"Found news article: {title}")
             # Extract text from the URL
             text = extract_text_from_url(link)
             if text:
@@ -153,83 +183,25 @@ def scrape_and_analyze(query, num_pages=1):
                 if star_rating:
                     result_data = {
                         "title": title,
-                        "source": source,
                         "snippet": snippet,
                         "sentiment": f"{star_rating} ({sentiment_label})",
                         "link": link
                     }
                     yield result_data  # Yield results for streaming
 
-# Commented out Google search functionality
-# def scrape_and_analyze_google(query, num_pages=1):
-#     """
-#     Scrape Google search results using httpx, analyze sentiment, and yield results.
-    
-#     Args:
-#         query (str): The search query.
-#         num_pages (int): Number of pages to scrape.
-#     """
-#     user_agents = [
-#         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-#         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36",
-#         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-#         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
-#         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36",
-#     ]
+# API route to analyze sentiment of text from search query
+@app.route('/analyze_sentiment', methods=['GET'])
+def analyze_sentiment():
+    query = request.args.get('query')
+    if not query:
+        return jsonify({"error": "No search query provided"}), 400
 
-#     for page in range(num_pages):
-#         try:
-#             # Build the URL
-#             params = {"q": query, "start": page * 10, "hl": "en"}
-#             url = f"https://www.google.com/search?{urllib.parse.urlencode(params)}"
-#             logging.info(f"Fetching: {url}")
-
-#             # Rotate user agent
-#             headers = {"User-Agent": random.choice(user_agents)}
-
-#             # Fetch the page
-#             response = httpx.get(url, headers=headers)
-#             response.raise_for_status()
-#             html = response.text
-
-#             if response.status_code == 429:
-#                 logging.warning("Received 429 Too Many Requests. Sleeping for a while...")
-#                 time.sleep(60)  # Sleep for 60 seconds before retrying
-#                 response = httpx.get(url, headers=headers)
-#                 response.raise_for_status()
-#                 html = response.text
-
-#             # Parse the HTML content
-#             soup = BeautifulSoup(html, 'html.parser')
-
-#             # Extract news results
-#             for result in soup.select("div#search a"):
-#                 title = result.select_one("h3").get_text(strip=True) if result.select_one('h3') else "No Title"
-#                 link = result.get("href") or None
-#                 source = result.select_one("span.VuuXrf").get_text(strip=True) if result.select_one("span.VuuXrf") else "Unknown Source"
-#                 snippet = result.select_one("div.VwiC3b").get_text(strip=True) if result.select_one("div.VwiC3b") else "No Snippet"
-
-#                 if link:
-#                     logging.info(f"Found news article: {title} from {source}")
-#                     # Extract text from the URL
-#                     text = extract_text_from_url(link)
-#                     if text:
-#                         # Perform sentiment analysis
-#                         star_rating, sentiment_label, _ = analyze_sentiment_with_stars(text)
-#                         if star_rating:
-#                             result_data = {
-#                                 "title": title,
-#                                 "source": source,
-#                                 "snippet": snippet,
-#                                 "sentiment": f"{star_rating} ({sentiment_label})",
-#                                 "link": link
-#                             }
-#                             yield result_data  # Yield results for streaming
-
-#             # Add delay between page requests
-#             time.sleep(random.randint(5, 10))
-#         except Exception as e:
-#             logging.error(f"Error scraping page {page}: {e}")
+    # Scrape DuckDuckGo and Google search results and analyze sentiment
+    results = list(scrape_and_analyze(query, num_pages=1))
+    if results:
+        return jsonify(results)
+    else:
+        return jsonify({"error": "Failed to analyze sentiment"}), 500
 
 # POST endpoint to accept search query and start scraping process
 @app.route('/start_scraping', methods=['POST'])

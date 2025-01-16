@@ -353,7 +353,7 @@ if st.button("Start Scraping"):
                         "Title": result.get("title", "No Title"),
                         "Snippet": result.get("snippet", "No Snippet")[:100] + "..." if result.get("snippet") else "No Snippet",  # Truncate snippet
                         "Sentiment": result.get("sentiment", "No Sentiment"),  # Use the correct sentiment
-                        "Link": result.get("link", "No Link")[:50] + "..." if result.get("link") else "No Link"  # Truncate link
+                        "Link": result.get("link", "No Link")  # Do not truncate link
                     }
                     results_df = results_df._append(new_row, ignore_index=True)
                     # Update the table in place

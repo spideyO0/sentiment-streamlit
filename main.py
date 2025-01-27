@@ -7,19 +7,20 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
-import os
 from dotenv import load_dotenv
 from accelerate import Accelerator
-from bs4 import BeautifulSoup
 import threading
-from readability.readability import Document
 import httpx
 import logging
 from duckduckgo_search import DDGS
-from googlesearch import search as google_search  # Import Google search
+from googlesearch import search as google_search
+from newspaper import Article
+from readability.readability import Document
+from bs4 import BeautifulSoup
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -95,42 +96,84 @@ def create_faiss_index(documents):
         logging.error(f"Error creating FAISS index: {e}")
         return None, None
 
-# Function to extract text from a URL
+# Function to extract text from a URL using newspaper3k and readability-lxml
 def extract_text_from_url(url):
+    """
+    Extracts readable text content from a given URL, ignoring PDFs.
+    
+    Args:
+        url (str): The URL of the web page to extract text from.
+
+    Returns:
+        str: Extracted text content as a single string, or None if the URL is a PDF or extraction fails.
+    """
     try:
+        # Fetch the web page
         response = httpx.get(url)
-        response.raise_for_status()
-        html = response.text
-        doc = Document(html)
-        content = doc.summary()
-        soup = BeautifulSoup(content, 'html.parser')
-        paragraphs = soup.find_all('p')
-        text = ' '.join([para.get_text() for para in paragraphs])
-        return text
+        response.raise_for_status()  # Raise an exception for HTTP errors
+
+        # Check if the content type is PDF
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'application/pdf' in content_type:
+            logger.info(f"Skipping PDF URL: {url}")
+            return None
+
+        # Use readability-lxml to extract readable content
+        doc = Document(response.text)
+        readable_html = doc.summary()
+
+        # Use BeautifulSoup to extract text from the readable HTML
+        soup = BeautifulSoup(readable_html, 'html.parser')
+        readable_text = soup.get_text(separator=' ')
+
+        # If readability-lxml fails to extract content, fall back to newspaper3k
+        if not readable_text.strip():
+            article = Article(url)
+            article.download()
+            article.parse()
+            readable_text = article.text
+
+        return readable_text.strip()
     except Exception as e:
-        logging.error(f"Error extracting text from URL {url}: {e}")
+        logger.error(f"Error extracting text from URL {url}: {e}")
         return None
 
-# Function to perform Google search
+# Function to perform Google search without retries
 def google_search_results(query, num_results):
     results = []
+    delay = 10  # Delay between requests in seconds
+
     try:
-        google_results = google_search(query, num_results=num_results, safe='off', sleep_interval=5, advanced=True, region="in", lang="en")
-        for result in google_results:
+        # Perform the search using the google-search library
+        search_results = google_search(
+            term=query,
+            num_results=num_results,
+            safe="off",
+            advanced=True,
+            region="in",
+            sleep_interval=delay  # Add delay between requests
+        )
+
+        # Process the results
+        for result in search_results:
             results.append({
                 "title": result.title if hasattr(result, 'title') else "No Title",
                 "url": result.url if hasattr(result, 'url') else result,
                 "description": result.description if hasattr(result, 'description') else "No Description"
             })
+
     except Exception as e:
-        logging.error(f"Google search error: {e}")
+        logger.error(f"Google search error: {e}")
+        # Return an empty list to trigger fallback to DuckDuckGo
+        return []
+
     return results
 
 # Function to perform DuckDuckGo search
 def duckduckgo_search_results(query, num_results):
     results = []
     ddg = DDGS()
-    ddg_results = ddg.text(keywords=query, max_results=num_results)
+    ddg_results = ddg.text(keywords=query, max_results=num_results, region='wt-wt', safesearch='off', backend='html')
     for result in ddg_results:
         results.append({
             "title": result.get('title', "No Title"),
@@ -139,55 +182,84 @@ def duckduckgo_search_results(query, num_results):
         })
     return results
 
-# Function to scrape DuckDuckGo and Google search results and analyze sentiment
-def scrape_and_analyze(query, num_pages=1):
+def is_social_media_url(url):
     """
-    Scrape DuckDuckGo and Google search results, analyze sentiment, and yield results.
-    
+    Check if the URL belongs to a social media domain.
+
     Args:
-        query (str): The search query.
-        num_pages (int): Number of pages to scrape.
+        url (str): The URL to check.
+
+    Returns:
+        bool: True if the URL is a social media link, False otherwise.
     """
-    results = []
+    # List of social media domains to ignore
+    SOCIAL_MEDIA_DOMAINS = [
+        "instagram.com", "facebook.com", "twitter.com", "x.com", "linkedin.com",
+        "youtube.com", "tiktok.com", "pinterest.com", "reddit.com", "snapchat.com",
+        "tumblr.com", "weibo.com", "whatsapp.com", "telegram.org", "discord.com",
+        "medium.com", "quora.com",
+    ]
 
-    # Google Search
-    google_results = google_search_results(query, num_pages * 10)
-    results.extend(google_results)
+    if not url:
+        return False
+    return any(domain in url.lower() for domain in SOCIAL_MEDIA_DOMAINS)
 
-    # Print Google results
-    logging.info("Google Results:")
-    for result in google_results:
-        logging.info(result)
+# Function to scrape DuckDuckGo and Google search results and analyze sentiment
+def scrape_and_analyze(base_query, extra_keywords):
+    seen_urls = set()
 
-    # DuckDuckGo Search
-    ddg_results = duckduckgo_search_results(query, num_pages * 10)
-    results.extend(ddg_results)
+    # Construct search queries based on presence of extra_keywords
+    if extra_keywords:
+        search_queries = [f"{base_query} {keyword.strip()}" for keyword in extra_keywords]
+    else:
+        search_queries = [base_query]
 
-    # Print DuckDuckGo results
-    logging.info("DuckDuckGo Results:")
-    for result in ddg_results:
-        logging.info(result)
+    for search_query in search_queries:
+        logger.info(f"Scraping query: {search_query}")
+        try:
+            # Try Google search first
+            google_results = google_search_results(search_query, 150)  
+            if not google_results:  # Fallback to DuckDuckGo if Google fails
+                logger.warning("Google search failed. Falling back to DuckDuckGo.")
+                ddg_results = duckduckgo_search_results(search_query, 150)  
+                results = ddg_results
+            else:
+                results = google_results
 
-    for result in results:
-        title = result.get("title", "No Title")
-        link = result.get("url")
-        snippet = result.get("description", "No Snippet")
+            # Process results
+            for result in results:
+                if result.get('url') not in seen_urls:
+                    seen_urls.add(result.get('url'))
+                    title = result.get("title", "No Title")
+                    link = result.get("url")
+                    snippet = result.get("description", "No Snippet")
 
-        if link:
-            logging.info(f"Found news article: {title}")
-            # Extract text from the URL
-            text = extract_text_from_url(link)
-            if text:
-                # Perform sentiment analysis
-                star_rating, sentiment_label, _ = analyze_sentiment_with_stars(text)
-                if star_rating:
-                    result_data = {
-                        "title": title,
-                        "snippet": snippet,
-                        "sentiment": f"{star_rating} ({sentiment_label})",
-                        "link": link
-                    }
-                    yield result_data  # Yield results for streaming
+                    # Skip PDF URLs
+                    if link and link.lower().endswith('.pdf'):
+                        logger.info(f"Skipping PDF URL: {link}")
+                        continue
+
+                    # Skip social media URLs
+                    if is_social_media_url(link):
+                        logger.info(f"Skipping social media URL: {link}")
+                        continue
+
+                    if link:
+                        logger.info(f"Found news article: {title}")
+                        # Extract text from the URL
+                        text = extract_text_from_url(link)
+                        if text:
+                            # Perform sentiment analysis
+                            star_rating, sentiment_label, _ = analyze_sentiment_with_stars(text)
+                            if star_rating:
+                                yield {
+                                    "title": title,
+                                    "snippet": snippet,
+                                    "sentiment": f"{star_rating} ({sentiment_label})",
+                                    "link": link
+                                }
+        except Exception as e:
+            logger.error(f"Error scraping query {search_query}: {e}")
 
 # API route to analyze sentiment of text from search query
 @app.route('/analyze_sentiment', methods=['GET'])
@@ -197,7 +269,7 @@ def analyze_sentiment():
         return jsonify({"error": "No search query provided"}), 400
 
     # Scrape DuckDuckGo and Google search results and analyze sentiment
-    results = list(scrape_and_analyze(query, num_pages=1))
+    results = list(scrape_and_analyze(query, []))
     if results:
         return jsonify(results)
     else:
@@ -207,44 +279,71 @@ def analyze_sentiment():
 @app.route('/start_scraping', methods=['POST'])
 def start_scraping():
     data = request.get_json()
-    query = data.get("query")
-    num_pages = data.get("num_pages", 1)
+    base_query = data.get("base_query", "")
+    extra_keywords = data.get("extra_keywords", [])
     
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
+    if not base_query and not extra_keywords:
+        return jsonify({"error": "No base query or keywords provided"}), 400
+    
+    # Log the search queries
+    logger.info(f"Starting scraping for base query: {base_query} with extra keywords: {extra_keywords}")
 
     # Start the scraping process in a separate thread
-    threading.Thread(target=scrape_and_analyze, args=(query, num_pages)).start()
-    return jsonify({"message": "Scraping started", "query": query, "num_pages": num_pages}), 200
+    try:
+        threading.Thread(
+            target=scrape_and_analyze,
+            args=(base_query, extra_keywords)
+        ).start()
+        return jsonify({
+            "message": "Scraping started",
+            "base_query": base_query,
+            "extra_keywords": extra_keywords,
+        }), 200
+    except Exception as e:
+        logger.error(f"Error starting scraping: {e}")
+        return jsonify({"error": f"Failed to start scraping: {e}"}), 500
 
 # GET endpoint to stream the results from the JSON file
 @app.route('/stream_results', methods=['GET'])
 def stream_results():
-    query = request.args.get('query')
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
+    base_query = request.args.get('base_query', "")
+    extra_keywords = request.args.getlist('extra_keywords')
+    
+    if not base_query and not extra_keywords:
+        return jsonify({"error": "No base query or keywords provided"}), 400
 
-    # Create a safe filename from the query
-    safe_query = "".join([c if c.isalnum() else "_" for c in query])
-    # output_file = os.path.join("D:/Python-Projects/sentiment-app/JSON-output", f"{safe_query}.json")
-    output_file = os.path.join("/mount/src/sentiment-streamlit/JSON-output", f"{safe_query}.json")
+    # Create search queries
+    search_queries = [base_query] + [f"{base_query} {keyword}" for keyword in extra_keywords]
 
-    # Wait until the file is created
-    while not os.path.exists(output_file):
-        time.sleep(1)
+    logger.info(f"Streaming results for queries: {search_queries}")
 
-    try:
-        def generate():
-            with open(output_file, "r", encoding="utf-8") as file:
-                for line in file:
-                    yield line
+    def generate():
+        seen_urls = set()  # Track seen URLs to avoid duplicates
+        try:
+            for query in search_queries:
+                logger.info(f"Starting scraping for query: {query}")
+                google_results = google_search_results(query, 150)
+                ddg_results = duckduckgo_search_results(query, 150)
+                results = google_results + ddg_results
+                for result in results:
+                    # Skip if we've already seen this URL
+                    if result.get('url') in seen_urls:
+                        continue
+                    
+                    # Add the URL to our seen set
+                    seen_urls.add(result.get('url'))
+                    
+                    # Add metadata about the search
+                    keyword = query.replace(base_query, "").strip()
+                    result['base_query'] = base_query
+                    result['keyword'] = keyword
+                    
+                    yield json.dumps(result) + "\n"
+        except Exception as e:
+            logger.error(f"Error streaming results: {e}")
+            yield json.dumps({"error": f"Failed to stream results: {e}"}) + "\n"
 
-        return Response(stream_with_context(generate()), mimetype='application/json')
-    except FileNotFoundError:
-        return jsonify({"error": "Results file not found"}), 404
-    except Exception as e:
-        logging.error(f"Error streaming results: {e}")
-        return jsonify({"error": "Failed to stream results"}), 500
+    return Response(stream_with_context(generate()), mimetype='application/json')
 
 # Flag to indicate if the Flask server is running
 flask_server_running = False
@@ -268,6 +367,10 @@ if not st.session_state.flask_server_running:
 # Streamlit app title
 st.title("Web Results Sentiment Analysis")
 
+# Initialize session state for extra keywords
+if 'extra_keywords' not in st.session_state:
+    st.session_state.extra_keywords = []
+
 # Sample search queries
 sample_queries = [
     "Maha Kumbh Prayagraj 2025 scam fraud threat theft attack mis-management",
@@ -278,7 +381,7 @@ sample_queries = [
 ]
 
 # Dropdown for sample search queries
-query = st.selectbox("Select a sample search query:", [""] + sample_queries)
+query = st.selectbox("Select a sample search query or enter your own:", [""] + sample_queries)
 
 # Input box for user input search query
 user_query = st.text_input("Or enter your own search query:")
@@ -287,8 +390,34 @@ user_query = st.text_input("Or enter your own search query:")
 if user_query:
     query = user_query
 
-# Input box for number of pages to scrape
-num_pages = st.number_input("Enter the number of pages to scrape:", min_value=1, max_value=100, value=1)
+# Extra keywords section
+st.subheader("Additional Keywords")
+
+# Input for new keyword
+new_keyword = st.text_input("Enter an additional keyword:", key="new_keyword_input")
+
+# Add keyword button
+if st.button("Add Keyword"):
+    if new_keyword.strip():
+        st.session_state.extra_keywords.append(new_keyword.strip())
+    else:
+        st.warning("Please enter a keyword before adding.")
+
+# Display current keywords
+if st.session_state.extra_keywords:
+    st.write("**Added Keywords:**")
+    for i, keyword in enumerate(st.session_state.extra_keywords):
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.write(f"- {keyword}")
+        with col2:
+            if st.button(f"Remove", key=f"remove_{i}"):
+                del st.session_state.extra_keywords[i]
+                st.rerun()
+
+    if st.button("Clear All Keywords"):
+        st.session_state.extra_keywords = []
+        st.rerun()
 
 # Placeholder for results table
 results_placeholder = st.empty()
@@ -297,46 +426,22 @@ results_placeholder = st.empty()
 if 'results' not in st.session_state:
     st.session_state.results = []
 
-# Load stored results from JSON files
-def load_stored_results():
-    # output_dir = r"D:\Python-Projects\sentiment-app\JSON-output"
-    output_dir = r"/mount/src/sentiment-streamlit/JSON-output"
-    all_results = []
-    if os.path.exists(output_dir) and os.listdir(output_dir):
-        for filename in os.listdir(output_dir):
-            if filename.endswith(".json"):
-                file_path = os.path.join(output_dir, filename)
-                with open(file_path, "r", encoding="utf-8") as file:
-                    results = json.load(file)
-                    all_results.extend(results)
-    return all_results
-
-# Load and display stored results on app start
-stored_results = load_stored_results()
-if stored_results:
-    st.session_state.results = stored_results
-    results_placeholder.dataframe(pd.DataFrame(st.session_state.results))
-
-# Callback function to update results in the main thread
-def update_results(result_data):
-    if 'results' not in st.session_state:
-        st.session_state.results = []
-    st.session_state.results.append(result_data)
-    results_placeholder.dataframe(pd.DataFrame(st.session_state.results))
-
 # Button to start scraping
 if st.button("Start Scraping"):
-    if not query:
-        st.error("Please enter a search query.")
+    if not query and not st.session_state.extra_keywords:
+        st.error("Please enter a search query or add keywords.")
     else:
         with st.spinner('Scraping in progress...'):
             try:
-                # Initialize session state for results
-                if 'results' not in st.session_state:
-                    st.session_state.results = []
-
                 # Start the scraping process
-                response = requests.post("http://localhost:8503/start_scraping", json={"query": query, "num_pages": num_pages})
+                response = requests.post(
+                    "http://localhost:8503/start_scraping",
+                    json={
+                        "base_query": query,
+                        "extra_keywords": st.session_state.extra_keywords,
+                        "num_pages": 30  # Default number of pages to scrape
+                    }
+                )
                 response.raise_for_status()
                 st.success("Scraping started. Streaming results...")
 
@@ -347,37 +452,29 @@ if st.button("Start Scraping"):
                 table_placeholder = st.empty()
 
                 # Stream results in real-time
-                for result in scrape_and_analyze(query, num_pages):
+                for result in scrape_and_analyze(query, st.session_state.extra_keywords):
                     # Append the result to the DataFrame
                     new_row = {
                         "Title": result.get("title", "No Title"),
-                        "Snippet": result.get("snippet", "No Snippet")[:100] + "..." if result.get("snippet") else "No Snippet",  # Truncate snippet
-                        "Sentiment": result.get("sentiment", "No Sentiment"),  # Use the correct sentiment
-                        "Link": result.get("link", "No Link")  # Do not truncate link
+                        "Snippet": result.get("snippet", "No Snippet"),
+                        "Sentiment": result.get("sentiment", "No Sentiment"),
+                        "Link": result.get("link", "No Link")
                     }
                     results_df = results_df._append(new_row, ignore_index=True)
                     # Update the table in place
                     table_placeholder.dataframe(results_df, width=1000)  # Adjust width as needed
 
+                # Export the DataFrame with full links
+                st.download_button(
+                    label="Export Results",
+                    data=results_df.to_csv(index=False).encode('utf-8'),
+                    file_name='web_results.csv',
+                    mime='text/csv',
+                )
+
             except requests.exceptions.RequestException as e:
                 st.error(f"An error occurred: {e}")
 
-# Button to clear all stored results
-if st.button("Clear All Stored Results"):
-    # output_dir = r"D:\Python-Projects\sentiment-app\JSON-output"
-    output_dir = r"/mount/src/sentiment-streamlit/JSON-output"
-    if os.path.exists(output_dir):
-        for filename in os.listdir(output_dir):
-            file_path = os.path.join(output_dir, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-        st.success("All stored results have been cleared.")
-        st.session_state.results = []
-        results_placeholder.empty()
-    else:
-        st.info("No results found in the /mount/src/sentiment-streamlit/JSON-output folder.")
-
 # Periodically check the scraping status and update the UI
 if st.session_state.get("scraping_started", False) and not st.session_state.get("scraping_done", False):
-    # st.info("Scraping is still in progress. Please wait...")
     time.sleep(5)

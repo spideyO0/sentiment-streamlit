@@ -11,5 +11,6 @@ httpx
 duckduckgo-search
 newspaper3k
 readability-lxml
+lxml_html_clean
 beautifulsoup4
 googlesearch-python

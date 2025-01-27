@@ -12,3 +12,4 @@ duckduckgo-search
 newspaper3k
 readability-lxml
 beautifulsoup4
+googlesearch-python

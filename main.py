@@ -173,7 +173,7 @@ def google_search_results(query, num_results):
 def duckduckgo_search_results(query, num_results):
     results = []
     ddg = DDGS()
-    ddg_results = ddg.text(keywords=query, max_results=num_results, region='wt-wt', safesearch='off', backend='html')
+    ddg_results = ddg.text(keywords=query, max_results=num_results, region='in-en', safesearch='off', backend='html')
     for result in ddg_results:
         results.append({
             "title": result.get('title', "No Title"),
